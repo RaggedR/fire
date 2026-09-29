@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fire — buoyant Navier–Stokes with vorticity confinement</title>
+<style>
+  :root { --panel: rgba(18,16,15,0.82); --line: rgba(255,190,120,0.18); --txt: #e8ddd2; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; background:#08070a; color:var(--txt);
+              font:13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; overflow:hidden; }
+  #wrap { position:fixed; inset:0; display:grid; place-items:center; }
+  canvas { max-width:100vw; max-height:100vh; display:block; image-rendering:auto;
+           box-shadow:0 0 120px rgba(255,120,30,0.10); }
+  #panel { position:fixed; top:12px; right:12px; width:288px; max-height:calc(100vh - 24px);
+           overflow-y:auto; background:var(--panel); border:1px solid var(--line);
+           border-radius:8px; padding:10px 12px; backdrop-filter:blur(8px); }
+  #panel h1 { font-size:12px; letter-spacing:.14em; text-transform:uppercase; margin:0 0 2px;
+              color:#ffb774; font-weight:600; }
+  #panel .sub { font-size:11px; color:#8d8179; margin:0 0 10px; }
+  .grp { margin:12px 0 4px; font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+         color:#6f655d; border-top:1px solid rgba(255,255,255,.07); padding-top:8px; }
+  .row { display:grid; grid-template-columns: 1fr 52px; gap:6px; align-items:center; margin:5px 0; }
+  .row label { font-size:11px; color:#b8aa9d; }
+  .row .val { text-align:right; font-size:11px; color:#ffb774; font-variant-numeric:tabular-nums; }
+  input[type=range] { grid-column:1/3; width:100%; height:3px; -webkit-appearance:none;
+                      background:rgba(255,255,255,.12); border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:11px; height:11px;
+      border-radius:50%; background:#ff9d3c; cursor:pointer; }
+  .btns { display:flex; gap:6px; margin-top:12px; }
+  button { flex:1; background:rgba(255,157,60,.12); border:1px solid rgba(255,157,60,.3);
+           color:#ffb774; padding:6px; border-radius:5px; font:inherit; font-size:11px; cursor:pointer; }
+  button:hover { background:rgba(255,157,60,.22); }
+  #hud { position:fixed; left:12px; bottom:12px; font-size:11px; color:#6f655d; }
+  #err { position:fixed; inset:0; display:none; place-items:center; padding:40px; text-align:center;
+         background:#08070a; color:#ff8d6b; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="err"></div>
+
+<div id="panel">
+  <h1>Fire</h1>
+  <p class="sub">Boussinesq buoyancy · vorticity confinement · blackbody emission</p>
+
+  <div class="grp">Flow</div>
+  <div class="row"><label>buoyancy β</label><span class="val" id="v_buoy"></span>
+    <input type="range" id="s_buoy" min="0" max="16" step="0.1"></div>
+  <div class="row"><label>vorticity confinement ε</label><span class="val" id="v_conf"></span>
+    <input type="range" id="s_conf" min="0" max="160" step="1"></div>
+  <div class="row"><label>soot weight α</label><span class="val" id="v_sootw"></span>
+    <input type="range" id="s_sootw" min="0" max="6" step="0.05"></div>
+  <div class="row"><label>velocity damping</label><span class="val" id="v_vdamp"></span>
+    <input type="range" id="s_vdamp" min="0" max="2" step="0.01"></div>
+  <div class="row"><label>turbulence forcing</label><span class="val" id="v_turb"></span>
+    <input type="range" id="s_turb" min="0" max="4" step="0.02"></div>
+
+  <div class="grp">Combustion</div>
+  <div class="row"><label>fuel injection</label><span class="val" id="v_fuel"></span>
+    <input type="range" id="s_fuel" min="0" max="6" step="0.05"></div>
+  <div class="row"><label>burn rate k</label><span class="val" id="v_burn"></span>
+    <input type="range" id="s_burn" min="0" max="16" step="0.1"></div>
+  <div class="row"><label>heat release</label><span class="val" id="v_heat"></span>
+    <input type="range" id="s_heat" min="0" max="6" step="0.05"></div>
+  <div class="row"><label>radiative cooling c<sub>T</sub></label><span class="val" id="v_cool"></span>
+    <input type="range" id="s_cool" min="0" max="10" step="0.05"></div>
+  <div class="row"><label>soot yield</label><span class="val" id="v_soot"></span>
+    <input type="range" id="s_soot" min="0" max="3" step="0.02"></div>
+
+  <div class="grp">Appearance</div>
+  <div class="row"><label>peak temperature (K)</label><span class="val" id="v_tmax"></span>
+    <input type="range" id="s_tmax" min="900" max="2600" step="10"></div>
+  <div class="row"><label>exposure</label><span class="val" id="v_expo"></span>
+    <input type="range" id="s_expo" min="0" max="4" step="0.02"></div>
+  <div class="row"><label>bloom</label><span class="val" id="v_bloom"></span>
+    <input type="range" id="s_bloom" min="0" max="2.5" step="0.02"></div>
+  <div class="row"><label>smoke opacity</label><span class="val" id="v_smoke"></span>
+    <input type="range" id="s_smoke" min="0" max="4" step="0.05"></div>
+
+  <div class="btns">
+    <button id="b_pause">pause</button>
+    <button id="b_reset">reset</button>
+    <button id="b_shot">save png</button>
+  </div>
+</div>
+<div id="hud"></div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Model
+//   du/dt = -(u.grad)u - grad p + f_buoy + f_conf + f_turb      (div u = 0)
+//   dT/dt = -(u.grad)T + q*burn - c_T * ((T-T0)/Tmax)^4          radiative cooling
+//   dY/dt = -(u.grad)Y - burn,   burn = k*Y*ignition(T)          fuel consumption
+//   dS/dt = -(u.grad)S + y_s*burn - decay*S                      soot
+//   f_buoy = (beta*(T - T_amb) - alpha*S) * zhat                 Boussinesq
+//   f_conf = eps*(N x w),  N = grad|w| / ||grad|w|||             Steinhoff/Fedkiw
+// Velocity is stored in uv-units per second; all spatial differencing is done
+// in texel units, which stays self-consistent through divergence -> Jacobi ->
+// gradient subtraction.  Half-float throughout (uv-scale velocity keeps the
+// magnitudes near 1, where fp16 has plenty of mantissa).
+// ---------------------------------------------------------------------------
+
+const SIM_W = 384, SIM_H = 288;     // simulation grid
+const OUT_W = 1152, OUT_H = 864;    // render resolution
+const JACOBI = 40;                  // pressure Poisson iterations
+
+const P = {
+  buoy: 3.2, conf: 20, sootw: 1.2, vdamp: 0.65, turb: 1.5,
+  fuel: 8.0, burn: 9.0, heat: 3.4, cool: 9.5, soot: 0.26,
+  tmax: 2050, expo: 1.15, bloom: 0.7, smoke: 0.95,
+};
+
+const canvas = document.getElementById("c");
+canvas.width = OUT_W; canvas.height = OUT_H;
+const gl = canvas.getContext("webgl2", { antialias:false, alpha:false,
+                                         preserveDrawingBuffer:true });
+function fail(msg){ const e=document.getElementById("err");
+  e.style.display="grid"; e.textContent=msg; throw new Error(msg); }
+if (!gl) fail("WebGL2 is unavailable in this browser.");
+if (!gl.getExtension("EXT_color_buffer_float")) fail("EXT_color_buffer_float unavailable — cannot render to float targets.");
+
+// ---------------------------------------------------------------------- glue
+
+const VERT = `#version 300 es
+in vec2 aPos; out vec2 vUv;
+void main(){ vUv = aPos*0.5 + 0.5; gl_Position = vec4(aPos,0.0,1.0); }`;
+
+const HEAD = `#version 300 es
+precision highp float; precision highp sampler2D;
+in vec2 vUv; out vec4 outColor;
+uniform vec2 uTexel;          // 1/resolution
+uniform float uDt, uTime;
+
+// The firebox is open at the top (chimney draw) and along the side walls below
+// this height (room air entrained at hearth level).  With no-flux on every other
+// boundary the domain would be sealed, and div u = 0 would force the net flux
+// through the chimney to be zero -- a closed jar rather than a fireplace.
+const float OPEN_Y = 0.32;
+
+float hash21(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i), hash21(i+vec2(1,0)), f.x),
+             mix(hash21(i+vec2(0,1)), hash21(i+vec2(1,1)), f.x), f.y);
+}
+float fbm(vec2 p){
+  float a = 0.5, s = 0.0, n = 0.0;
+  for (int i=0;i<4;i++){ s += a*vnoise(p); n += a; p = p*2.03 + 17.1; a *= 0.5; }
+  return s / n;          // normalised: mean 0.5, so fbm()-0.5 is genuinely zero-mean
+}
+`;
+
+function compile(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    console.error(src.split("\n").map((l,i)=>(i+1)+": "+l).join("\n"));
+    fail("Shader compile error:\n" + log);
+  }
+  return s;
+}
+function program(fragBody){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, HEAD + fragBody));
+  gl.bindAttribLocation(p, 0, "aPos");
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) fail("Link error: " + gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i=0;i<n;i++){ const nm = gl.getActiveUniform(p,i).name.replace(/\[0\]$/,"");
+                         u[nm] = gl.getUniformLocation(p, nm); }
+  return { p, u };
+}
+
+const quad = gl.createVertexArray();
+gl.bindVertexArray(quad);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+function target(w, h, internal){
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, internal, w, h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+  return { tex, fbo, w, h, texel:[1/w, 1/h] };
+}
+function pair(w,h,internal){
+  return { a: target(w,h,internal), b: target(w,h,internal),
+           get read(){ return this.a; }, get write(){ return this.b; },
+           swap(){ const t=this.a; this.a=this.b; this.b=t; } };
+}
+
+let unit = 0;
+function bind(loc, t){ gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex);
+                       gl.uniform1i(loc, unit); unit++; }
+function draw(prog, dst, setup){
+  unit = 0;
+  gl.useProgram(prog.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fbo : null);
+  gl.viewport(0, 0, dst ? dst.w : canvas.width, dst ? dst.h : canvas.height);
+  if (prog.u.uTexel) gl.uniform2fv(prog.u.uTexel, dst ? dst.texel : [1/canvas.width, 1/canvas.height]);
+  if (setup) setup(prog.u);
+  gl.bindVertexArray(quad);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// ------------------------------------------------------------------- targets
+
+const vel   = pair(SIM_W, SIM_H, gl.RG16F);    // (vx, vy)  uv-units / second
+const field = pair(SIM_W, SIM_H, gl.RGBA16F);  // (T, fuel, soot, -)
+const pres  = pair(SIM_W, SIM_H, gl.R16F);
+const div   = target(SIM_W, SIM_H, gl.R16F);
+const curl  = target(SIM_W, SIM_H, gl.R16F);
+const obs   = target(SIM_W, SIM_H, gl.RGBA16F); // (solid, surface band, grain, up-facing)
+const scene = target(OUT_W, OUT_H, gl.RGBA16F);
+const bloomA = target(OUT_W>>2, OUT_H>>2, gl.RGBA16F);
+const bloomB = target(OUT_W>>2, OUT_H>>2, gl.RGBA16F);
+
+// -------------------------------------------------------------------- scene geometry
+
+// Logs as capsules in aspect-corrected space.  Baked once into `obs`:
+//   R = solid mask, G = surface emission band, B = grain noise, A = up-facing weight.
+const GEOM = `
+const float AR = ${(SIM_W/SIM_H).toFixed(6)};
+float sdCapsule(vec2 p, vec2 a, vec2 b, float r){
+  vec2 pa = p-a, ba = b-a;
+  float h = clamp(dot(pa,ba)/dot(ba,ba), 0.0, 1.0);
+  return length(pa - ba*h) - r;
+}
+vec2 toP(vec2 uv){ return vec2(uv.x*AR, uv.y); }
+
+// Four capsules stacked like a real fire lay: two bed logs, one bridging the
+// gap, one leaning.  Returns (signed distance, log id) so each log can be
+// shaded and grained independently instead of merging into one mass.
+vec2 sdLogs(vec2 p){
+  vec2 r = vec2(sdCapsule(p, vec2(0.36,0.100), vec2(0.98,0.116), 0.046), 0.07);
+  vec2 c;
+  c = vec2(sdCapsule(p, vec2(0.30,0.186), vec2(0.66,0.168), 0.034), 0.41); if (c.x<r.x) r=c;
+  c = vec2(sdCapsule(p, vec2(0.56,0.190), vec2(0.95,0.180), 0.038), 0.68); if (c.x<r.x) r=c;
+  c = vec2(sdCapsule(p, vec2(0.50,0.252), vec2(0.88,0.292), 0.031), 0.93); if (c.x<r.x) r=c;
+  return r;
+}
+// Warped distance: fbm on the distance field gives a bark silhouette rather
+// than a clean tube.  Shared by the bake and the renderer so sim and image agree.
+vec2 logField(vec2 uv){
+  vec2 p = toP(uv);
+  vec2 di = sdLogs(p);
+  return vec2(di.x + (fbm(p*30.0) - 0.5)*0.014, di.y);
+}
+float logD(vec2 uv){ return logField(uv).x; }
+vec2 logNormal(vec2 uv, vec2 h){
+  return normalize(vec2(logD(uv+vec2(h.x,0.0)) - logD(uv-vec2(h.x,0.0)),
+                        logD(uv+vec2(0.0,h.y)) - logD(uv-vec2(0.0,h.y))) + 1e-6);
+}
+`;
+
+const progBake = program(GEOM + `
+void main(){
+  vec2 f = logField(vUv);
+  float d = f.x;
+  float solid = smoothstep(0.004, -0.004, d);
+  // Pyrolysis happens in a thin shell hugging the surface, not a fat halo.
+  float band  = smoothstep(0.032, 0.0, abs(d));
+  float up    = clamp(logNormal(vUv, uTexel).y, 0.0, 1.0);
+  float grain = fbm(toP(vUv)*vec2(40.0, 120.0) + f.y*37.0);
+  outColor = vec4(solid, band, grain, up);
+}`);
+
+// ------------------------------------------------------------------- physics passes
+
+const progAdvect = program(`
+uniform sampler2D uVel, uSrc, uObs;
+uniform float uDiss;
+void main(){
+  if (texture(uObs, vUv).r > 0.5) { outColor = vec4(0.0); return; }
+  vec2 v = texture(uVel, vUv).xy;
+  vec2 pos = vUv - uDt * v;                       // semi-Lagrangian backtrace
+  pos = clamp(pos, uTexel*0.5, 1.0 - uTexel*0.5);
+  outColor = texture(uSrc, pos) * uDiss;
+}`);
+
+// Sources + reaction + cooling, fused into one pass over the scalar fields.
+const progChem = program(GEOM + `
+uniform sampler2D uField, uObs;
+uniform float uFuel, uBurn, uHeat, uCool, uSoot, uIgnite;
+void main(){
+  vec4 f = texture(uField, vUv);
+  float T = f.r, Y = f.g, S = f.b;
+  vec4 o = texture(uObs, vUv);
+
+  // --- fuel pyrolysis off the log surfaces, biased to up-facing faces -------
+  float flicker = smoothstep(0.34, 0.88,
+      fbm(vec2(vUv.x*26.0, vUv.y*26.0 - uTime*2.6)) * 0.75 +
+      fbm(vec2(vUv.x*6.0,  vUv.y*6.0  - uTime*0.9)) * 0.45);
+  // A real log does not flame along its whole length at once: the active zone
+  // is a couple of patches that wander as the wood chars through.  One low
+  // frequency band in x, drifting slowly, reproduces that.
+  float zone = max(smoothstep(0.40, 0.74, fbm(vec2(vUv.x*2.6 + uTime*0.070,  7.3))),
+                   smoothstep(0.40, 0.74, fbm(vec2(vUv.x*3.7 - uTime*0.052, 21.9))));
+  float emit = o.g * (0.15 + 0.85*pow(max(o.a, 0.0), 1.3))   // up-facing faces burn
+                   * flicker * (0.28 + 0.72*zone);
+  Y += uFuel * emit * uDt;
+
+  // --- glowing char keeps the surface above the ignition point, so the fire
+  //     re-lights itself every frame instead of blowing out.
+  float pilot = o.g * o.a * (0.30 + 0.18*fbm(vec2(vUv.x*14.0, vUv.y*14.0 - uTime*1.1)));
+  T = max(T, pilot);
+  T = max(T, uIgnite * o.g);                       // stronger pilot during ignition
+
+  // --- combustion ----------------------------------------------------------
+  float ign = smoothstep(0.16, 0.30, T);          // ignition threshold, softened
+  float burn = min(Y, uBurn * Y * ign * uDt);
+  Y -= burn;
+  T += uHeat * burn;
+  S += uSoot * burn;
+
+  // --- radiative loss: Stefan-Boltzmann, so hot gas cools violently then idles
+  float t = max(T, 0.0);
+  T -= uCool * t*t*t*t * uDt;
+  T = max(T, 0.0);
+  S *= exp(-0.95 * uDt);   // turbulent mixing thins the plume with height
+  Y *= exp(-0.20 * uDt);
+
+  if (o.r > 0.5) { Y = 0.0; S = 0.0; }
+  outColor = vec4(T, Y, S, 1.0);
+}`);
+
+const progBuoy = program(`
+uniform sampler2D uVel, uField, uObs;
+uniform float uBuoy, uSootW, uDamp, uTurb, uTamb;
+void main(){
+  vec2 v = texture(uVel, vUv).xy;
+  vec4 f = texture(uField, vUv);
+  // Boussinesq: hot gas rises, soot loading weighs it back down.
+  float a = uBuoy * max(f.r - uTamb, 0.0) - uSootW * f.b;
+  v.y += a * uDt;
+  // Small-scale forcing so the plume never settles into a symmetric column.
+  float n1 = fbm(vUv*vec2(7.0,4.5) + vec2(0.0, -uTime*0.55)) - 0.5;
+  float n2 = fbm(vUv*vec2(7.0,4.5) + vec2(31.7, -uTime*0.55 + 11.3)) - 0.5;
+  float stir = smoothstep(0.02, 0.25, f.r) + texture(uObs, vUv).g;
+  v += uTurb * vec2(n1, n2*0.5) * stir * uDt;
+  v *= exp(-uDamp * uDt);
+  if (texture(uObs, vUv).r > 0.5) v = vec2(0.0);
+  outColor = vec4(v, 0.0, 1.0);
+}`);
+
+const progCurl = program(`
+uniform sampler2D uVel;
+void main(){
+  float l = texture(uVel, vUv - vec2(uTexel.x,0.0)).y;
+  float r = texture(uVel, vUv + vec2(uTexel.x,0.0)).y;
+  float b = texture(uVel, vUv - vec2(0.0,uTexel.y)).x;
+  float t = texture(uVel, vUv + vec2(0.0,uTexel.y)).x;
+  outColor = vec4(0.5*((r-l) - (t-b)), 0.0, 0.0, 1.0);
+}`);
+
+// Steinhoff vorticity confinement: push velocity back along N x w, where N points
+// up the gradient of |w|.  Semi-Lagrangian advection bleeds curl away every step;
+// this pumps it back in at the smallest resolvable scale, which is what makes the
+// flame tongues curl and pinch off instead of dissolving into a smooth plume.
+const progConfine = program(`
+uniform sampler2D uVel, uCurl, uObs;
+uniform float uEps, uFcap;
+void main(){
+  float l = abs(texture(uCurl, vUv - vec2(uTexel.x,0.0)).r);
+  float r = abs(texture(uCurl, vUv + vec2(uTexel.x,0.0)).r);
+  float b = abs(texture(uCurl, vUv - vec2(0.0,uTexel.y)).r);
+  float t = abs(texture(uCurl, vUv + vec2(0.0,uTexel.y)).r);
+  float w = texture(uCurl, vUv).r;
+  vec2 g = 0.5*vec2(r-l, t-b);
+  // Soft normalisation.  A hard 1/|g| returns a unit vector even where the
+  // curl is flat, so the term injects direction-noise everywhere and the
+  // simulation blows up.  The epsilon makes N fade out in smooth regions,
+  // confining only at genuine vortex cores.
+  vec2 N = g / (length(g) + 2.0e-3);
+  vec2 f = uEps * vec2(N.y, -N.x) * w;
+  // Confinement is anti-dissipative and has no natural bound: cap it.
+  float m = length(f);
+  if (m > uFcap) f *= uFcap / m;
+  vec2 v = texture(uVel, vUv).xy + f * uDt;
+  if (texture(uObs, vUv).r > 0.5) v = vec2(0.0);
+  outColor = vec4(v, 0.0, 1.0);
+}`);
+
+const progDiv = program(`
+uniform sampler2D uVel, uObs;
+vec2 vAt(vec2 uv){
+  if (texture(uObs, uv).r > 0.5) return vec2(0.0);
+  return texture(uVel, uv).xy;
+}
+void main(){
+  vec2 l = vAt(vUv - vec2(uTexel.x,0.0)), r = vAt(vUv + vec2(uTexel.x,0.0));
+  vec2 b = vAt(vUv - vec2(0.0,uTexel.y)), t = vAt(vUv + vec2(0.0,uTexel.y));
+  // Solid walls and floor: no flux, enforced by reflecting the outside sample.
+  bool openX = vUv.y < OPEN_Y;
+  if (vUv.x - uTexel.x < 0.0 && !openX) l.x = -r.x;
+  if (vUv.x + uTexel.x > 1.0 && !openX) r.x = -l.x;
+  if (vUv.y - uTexel.y < 0.0) b.y = -t.y;
+  outColor = vec4(0.5*((r.x-l.x) + (t.y-b.y)), 0.0, 0.0, 1.0);
+}`);
+
+// Pressure Poisson.  Neumann (dp/dn = 0) at walls, floor and log surfaces;
+// Dirichlet p = 0 along the top edge, which is what lets the chimney draw.
+const progJacobi = program(`
+uniform sampler2D uPres, uDiv, uObs;
+float pAt(vec2 uv, float centre){
+  if (uv.y > 1.0) return 0.0;                                   // chimney outflow
+  if ((uv.x < 0.0 || uv.x > 1.0) && uv.y < OPEN_Y) return 0.0;  // room-air inlets
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0) return centre;    // solid wall: Neumann
+  if (texture(uObs, uv).r > 0.5) return centre;                 // log surface: Neumann
+  return texture(uPres, uv).r;
+}
+void main(){
+  float c = texture(uPres, vUv).r;
+  float l = pAt(vUv - vec2(uTexel.x,0.0), c), r = pAt(vUv + vec2(uTexel.x,0.0), c);
+  float b = pAt(vUv - vec2(0.0,uTexel.y), c), t = pAt(vUv + vec2(0.0,uTexel.y), c);
+  outColor = vec4((l+r+b+t - texture(uDiv, vUv).r) * 0.25, 0.0, 0.0, 1.0);
+}`);
+
+const progGrad = program(`
+uniform sampler2D uPres, uVel, uObs;
+float pAt(vec2 uv, float centre){
+  if (uv.y > 1.0) return 0.0;                                   // chimney outflow
+  if ((uv.x < 0.0 || uv.x > 1.0) && uv.y < OPEN_Y) return 0.0;  // room-air inlets
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0) return centre;    // solid wall: Neumann
+  if (texture(uObs, uv).r > 0.5) return centre;                 // log surface: Neumann
+  return texture(uPres, uv).r;
+}
+void main(){
+  float c = texture(uPres, vUv).r;
+  float l = pAt(vUv - vec2(uTexel.x,0.0), c), r = pAt(vUv + vec2(uTexel.x,0.0), c);
+  float b = pAt(vUv - vec2(0.0,uTexel.y), c), t = pAt(vUv + vec2(0.0,uTexel.y), c);
+  vec2 v = texture(uVel, vUv).xy - 0.5*vec2(r-l, t-b);
+  if ((vUv.x < uTexel.x || vUv.x > 1.0-uTexel.x) && vUv.y >= OPEN_Y) v.x = 0.0;
+  if (vUv.y < uTexel.y) v.y = max(v.y, 0.0);
+  if (texture(uObs, vUv).r > 0.5) v = vec2(0.0);
+  outColor = vec4(v, 0.0, 1.0);
+}`);
+
+// ----------------------------------------------------------------- rendering
+
+const progRender = program(GEOM + `
+uniform sampler2D uField, uObs;
+uniform float uTmax, uExpo, uSmoke;
+
+// Tanner Helland's piecewise fit to the Planckian locus, 1000-40000 K.
+vec3 blackbody(float K){
+  float t = clamp(K, 1000.0, 40000.0) / 100.0;
+  float r, g, b;
+  if (t <= 66.0) r = 255.0; else r = 329.698727446 * pow(t-60.0, -0.1332047592);
+  if (t <= 66.0) g = 99.4708025861*log(t) - 161.1195681661;
+  else           g = 288.1221695283*pow(t-60.0, -0.0755148492);
+  if (t <= 19.0) b = 0.0;
+  else if (t >= 66.0) b = 255.0;
+  else b = 138.5177312231*log(t-10.0) - 305.0447927307;
+  return clamp(vec3(r,g,b)/255.0, 0.0, 1.0);
+}
+
+void main(){
+  vec4 f = texture(uField, vUv);
+  float T = max(f.r, 0.0), S = max(f.b, 0.0);
+  vec2 p = toP(vUv);
+
+  // --- hearth backdrop: sooted firebrick lit by the fire, 1/r^2-ish falloff --
+  float brick = fbm(p*vec2(7.0,13.0));
+  vec3 bg = mix(vec3(0.028,0.020,0.016), vec3(0.055,0.038,0.029), brick);
+  float lit = exp(-2.4 * length(p - vec2(0.667,0.14)));
+  bg *= 0.10 + 1.25*lit;
+  bg = mix(bg, vec3(0.006,0.005,0.006), smoothstep(0.26, 0.90, vUv.y));
+
+  // --- ash bed with live coals, so the logs rest on something ---------------
+  float floorY = 0.082 + 0.014*fbm(p*vec2(15.0,4.0));
+  float onFloor = smoothstep(floorY+0.006, floorY-0.006, vUv.y);
+  vec3 ash = mix(vec3(0.006,0.005,0.005), vec3(0.024,0.021,0.019), fbm(p*vec2(26.0,38.0)));
+  ash *= 0.15 + 1.35*lit;
+  float coal  = smoothstep(0.55, 0.88, fbm(p*vec2(18.0,60.0) + 13.7));
+  float under = smoothstep(0.0, 0.85, 1.0 - abs(p.x - 0.667)/0.62);
+  float pulse = 0.45 + 0.55*fbm(p*5.0 + vec2(0.0, uTime*0.4));
+  ash += blackbody(mix(820.0, 1300.0, coal)) * coal*coal * under * pulse * 1.3;
+  bg = mix(bg, ash, onFloor);
+
+  // --- logs, evaluated analytically so the silhouette stays sharp -----------
+  vec2 lf = logField(vUv);
+  float solid = smoothstep(0.0015, -0.0015, lf.x);
+  vec3 col = bg;
+  if (solid > 0.001){
+    vec2 n = logNormal(vUv, uTexel);
+    float grain = fbm(p*vec2(38.0,110.0) + lf.y*37.0);
+    // Cracks in the char: thin, aligned with the grain, and sparse.
+    float crack = smoothstep(0.52, 0.80, fbm(p*vec2(14.0,120.0) + lf.y*11.0));
+    float breathe = 0.45 + 0.55*fbm(p*6.0 + vec2(0.0, uTime*0.30));
+    float hot = crack * breathe * (0.35 + 0.65*clamp(n.y,0.0,1.0));
+    vec3 charcoal = mix(vec3(0.009,0.007,0.006), vec3(0.042,0.032,0.026), grain);
+    charcoal *= 0.30 + 0.70*clamp(n.y*0.6 + 0.5, 0.0, 1.0);        // lit from above
+    vec3 emberCol = blackbody(mix(750.0, 1350.0, hot)) * hot*hot * 1.4;
+    col = mix(col, charcoal + emberCol, solid);
+  }
+
+  // --- soot extinction, with only a whisper of in-scatter -------------------
+  col *= exp(-uSmoke * S);
+  col += vec3(0.030,0.026,0.026) * (1.0 - exp(-uSmoke * S)) * 0.35;
+
+  // --- flame emission: blackbody colour, Stefan-Boltzmann-ish intensity -----
+  float K = mix(300.0, uTmax, clamp(T, 0.0, 1.0));
+  float lum = pow(T, 2.6);
+  col += blackbody(K) * lum * uExpo;
+  // Hearth framing: the walls of the firebox fall away at the edges.
+  float vig = smoothstep(1.05, 0.30, length((vUv - vec2(0.5,0.42)) * vec2(1.35,1.0)));
+  outColor = vec4(col * (0.35 + 0.65*vig), 1.0);
+}`);
+
+const progPrefilter = program(`
+uniform sampler2D uSrc; uniform float uThresh;
+void main(){
+  vec3 c = texture(uSrc, vUv).rgb;
+  float l = dot(c, vec3(0.2126,0.7152,0.0722));
+  outColor = vec4(c * smoothstep(uThresh, uThresh*2.2, l), 1.0);
+}`);
+
+const progBlur = program(`
+uniform sampler2D uSrc; uniform vec2 uDir;
+void main(){
+  vec3 s = texture(uSrc, vUv).rgb * 0.227027;
+  vec2 d = uDir * uTexel;
+  s += (texture(uSrc, vUv + d*1.3846).rgb + texture(uSrc, vUv - d*1.3846).rgb) * 0.316216;
+  s += (texture(uSrc, vUv + d*3.2308).rgb + texture(uSrc, vUv - d*3.2308).rgb) * 0.070270;
+  outColor = vec4(s, 1.0);
+}`);
+
+const progComposite = program(`
+uniform sampler2D uScene, uBloom; uniform float uBloomAmt;
+vec3 aces(vec3 x){
+  const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+void main(){
+  vec3 c = texture(uScene, vUv).rgb + texture(uBloom, vUv).rgb * uBloomAmt;
+  c = aces(c);
+  c = pow(c, vec3(1.0/2.2));
+  c += (hash21(vUv*vec2(1024.0,768.0) + uTime) - 0.5) * 0.010;   // dither
+  outColor = vec4(c, 1.0);
+}`);
+
+// ---------------------------------------------------------------------- loop
+
+function bake(){
+  draw(progBake, obs, u => { gl.uniform1f(u.uTime, 0); gl.uniform1f(u.uDt, 0); });
+}
+function clearSim(){
+  for (const t of [vel.a, vel.b, field.a, field.b, pres.a, pres.b]){
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  tSim = 0;
+}
+
+let tSim = 0, paused = false, last = performance.now(), fps = 60;
+
+function step(dt){
+  const T = tSim;
+
+  draw(progAdvect, vel.write, u => {
+    bind(u.uVel, vel.read); bind(u.uSrc, vel.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uDiss, 1.0);
+  }); vel.swap();
+
+  draw(progAdvect, field.write, u => {
+    bind(u.uVel, vel.read); bind(u.uSrc, field.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uDiss, 0.998);
+  }); field.swap();
+
+  draw(progChem, field.write, u => {
+    bind(u.uField, field.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uTime, T);
+    gl.uniform1f(u.uFuel, P.fuel);  gl.uniform1f(u.uBurn, P.burn);
+    gl.uniform1f(u.uHeat, P.heat);  gl.uniform1f(u.uCool, P.cool);
+    gl.uniform1f(u.uSoot, P.soot);
+    gl.uniform1f(u.uIgnite, T < 1.5 ? 0.9 : 0.0);   // pilot flame, first 1.5 s
+  }); field.swap();
+
+  draw(progBuoy, vel.write, u => {
+    bind(u.uVel, vel.read); bind(u.uField, field.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uTime, T);
+    gl.uniform1f(u.uBuoy, P.buoy); gl.uniform1f(u.uSootW, P.sootw);
+    gl.uniform1f(u.uDamp, P.vdamp); gl.uniform1f(u.uTurb, P.turb);
+    gl.uniform1f(u.uTamb, 0.04);
+  }); vel.swap();
+
+  draw(progCurl, curl, u => { bind(u.uVel, vel.read); gl.uniform1f(u.uDt, dt); });
+  draw(progConfine, vel.write, u => {
+    bind(u.uVel, vel.read); bind(u.uCurl, curl); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uEps, P.conf); gl.uniform1f(u.uFcap, 6.0);
+  }); vel.swap();
+
+  draw(progDiv, div, u => { bind(u.uVel, vel.read); bind(u.uObs, obs); gl.uniform1f(u.uDt, dt); });
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pres.read.fbo);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+  for (let i=0;i<JACOBI;i++){
+    draw(progJacobi, pres.write, u => {
+      bind(u.uPres, pres.read); bind(u.uDiv, div); bind(u.uObs, obs);
+      gl.uniform1f(u.uDt, dt);
+    }); pres.swap();
+  }
+  draw(progGrad, vel.write, u => {
+    bind(u.uPres, pres.read); bind(u.uVel, vel.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uDt, dt);
+  }); vel.swap();
+
+  tSim += dt;
+}
+
+function render(){
+  draw(progRender, scene, u => {
+    bind(u.uField, field.read); bind(u.uObs, obs);
+    gl.uniform1f(u.uTime, tSim); gl.uniform1f(u.uDt, 0);
+    gl.uniform1f(u.uTmax, P.tmax); gl.uniform1f(u.uExpo, P.expo);
+    gl.uniform1f(u.uSmoke, P.smoke);
+  });
+  draw(progPrefilter, bloomA, u => { bind(u.uSrc, scene); gl.uniform1f(u.uThresh, 0.85);
+                                     gl.uniform1f(u.uDt,0); gl.uniform1f(u.uTime,0); });
+  draw(progBlur, bloomB, u => { bind(u.uSrc, bloomA); gl.uniform2f(u.uDir, 1, 0);
+                                gl.uniform1f(u.uDt,0); gl.uniform1f(u.uTime,0); });
+  draw(progBlur, bloomA, u => { bind(u.uSrc, bloomB); gl.uniform2f(u.uDir, 0, 1);
+                                gl.uniform1f(u.uDt,0); gl.uniform1f(u.uTime,0); });
+  draw(progComposite, null, u => {
+    bind(u.uScene, scene); bind(u.uBloom, bloomA);
+    gl.uniform1f(u.uBloomAmt, P.bloom); gl.uniform1f(u.uTime, tSim); gl.uniform1f(u.uDt, 0);
+  });
+}
+
+function frame(now){
+  const raw = (now - last) / 1000; last = now;
+  fps += (1/Math.max(raw,1e-4) - fps) * 0.08;
+  if (!paused) step(Math.min(raw, 1/45));
+  render();
+  document.getElementById("hud").textContent =
+    `${SIM_W}x${SIM_H} grid · ${JACOBI} Jacobi · ${fps.toFixed(0)} fps · t=${tSim.toFixed(1)}s`;
+  requestAnimationFrame(frame);
+}
+
+// ------------------------------------------------------------------------ UI
+
+for (const key of Object.keys(P)){
+  const s = document.getElementById("s_"+key), v = document.getElementById("v_"+key);
+  if (!s) continue;
+  const show = () => v.textContent = (P[key] >= 100 ? P[key].toFixed(0) : P[key].toFixed(2));
+  s.value = P[key]; show();
+  s.addEventListener("input", () => { P[key] = parseFloat(s.value); show(); });
+}
+document.getElementById("b_pause").onclick = e => { paused = !paused; e.target.textContent = paused ? "run" : "pause"; };
+document.getElementById("b_reset").onclick = () => clearSim();
+document.getElementById("b_shot").onclick = () => {
+  render();
+  const a = document.createElement("a");
+  a.download = "fire.png"; a.href = canvas.toDataURL("image/png"); a.click();
+};
+addEventListener("keydown", e => {
+  if (e.key === " ") { e.preventDefault(); document.getElementById("b_pause").click(); }
+  if (e.key === "r") clearSim();
+});
+
+// Exposed so a headless driver can advance the simulation at a fixed timestep
+// regardless of requestAnimationFrame throttling, and grab deterministic frames.
+window.fire = {
+  step, render, P,
+  reset: clearSim,
+  get time(){ return tSim; },
+  run(seconds, dt = 1/60){ const n = Math.round(seconds/dt); for (let i=0;i<n;i++) step(dt); render(); },
+  set paused(v){ paused = v; },
+  // Read the scalar fields back for diagnostics: max/mean of T, fuel and soot.
+  stats(){
+    const w = SIM_W, h = SIM_H, px = new Float32Array(w*h*4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, field.read.fbo);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, px);
+    const r = { Tmax:0, Tmean:0, Ymax:0, Smax:0, Smean:0, hot:0 };
+    for (let i=0;i<w*h;i++){
+      const T = px[i*4], Y = px[i*4+1], S = px[i*4+2];
+      r.Tmax = Math.max(r.Tmax, T); r.Ymax = Math.max(r.Ymax, Y);
+      r.Smax = Math.max(r.Smax, S);
+      r.Tmean += T; r.Smean += S; if (T > 0.5) r.hot++;
+    }
+    r.Tmean /= w*h; r.Smean /= w*h; r.hotFrac = r.hot/(w*h);
+    // Flame shape: the highest row still luminous, and the width at mid-height.
+    let top = 0, wide = 0;
+    for (let y=h-1; y>=0; y--){
+      let any = false;
+      for (let x=0; x<w; x++) if (px[(y*w+x)*4] > 0.35) { any = true; break; }
+      if (any) { top = y; break; }
+    }
+    const ym = Math.min(h-1, Math.round(top*0.45));
+    for (let x=0; x<w; x++) if (px[(ym*w+x)*4] > 0.35) wide++;
+    r.flameTop = top/h; r.flameWidth = wide/w;
+    // Velocity: is the plume actually rising, or has the flow stalled/inverted?
+    const vp = new Float32Array(w*h*4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, vel.read.fbo);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, vp);
+    let vyUp = 0, vyDn = 0, vmax = 0;
+    for (let i=0;i<w*h;i++){
+      const vy = vp[i*4+1];
+      if (vy > 0) vyUp += vy; else vyDn -= vy;
+      vmax = Math.max(vmax, Math.abs(vy));
+    }
+    r.vyUp = vyUp/(w*h); r.vyDown = vyDn/(w*h); r.vyMax = vmax;
+    return r;
+  },
+};
+
+bake();
+clearSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
